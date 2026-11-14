@@ -1,5 +1,5 @@
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   FileText,
   LayoutDashboard,
@@ -20,8 +20,37 @@ import {
 
 import "./App.css";
 import ChatScreen from "./ChatScreen";
-
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 function App() {
+  useEffect(() => {
+    const fetchDocuments = async () => {
+        try {
+            const response = await fetch(`${API_URL}/api/documents`);
+
+            if (!response.ok) {
+                throw new Error("Failed to fetch documents");
+            }
+
+            const result = await response.json();
+
+            const savedDocuments = result.map((document) => ({
+                id: document.id,
+                name: document.file_name,
+                size: null,
+                uploadedAt: document.created_at
+                    ? new Date(document.created_at).toLocaleDateString()
+                    : ""
+            }));
+
+            setDocuments(savedDocuments);
+
+        } catch (error) {
+            console.error("Error fetching documents:", error);
+        }
+    };
+
+    fetchDocuments();
+}, []);
   const [documents, setDocuments] = useState([]);
   const [search, setSearch] = useState("");
   const [activePage, setActivePage] = useState("Dashboard");
@@ -43,7 +72,7 @@ function App() {
 
       try {
         const response = await fetch(
-          `${import.meta.env.VITE_API_URL}/api/documents/upload`,
+          `${API_URL}/api/documents/upload`,
           {
             method: "POST",
             body: formData
@@ -311,7 +340,9 @@ function App() {
                   <div className="document-info">
                     <strong>{document.name}</strong>
                     <span>
-                      PDF · {document.size} MB · Uploaded {document.uploadedAt}
+                      PDF
+                      {document.size && ` · ${document.size} MB`}
+                      {document.uploadedAt && ` · Uploaded ${document.uploadedAt}`}
                     </span>
                   </div>
 

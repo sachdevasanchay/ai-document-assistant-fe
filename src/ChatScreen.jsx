@@ -1,4 +1,3 @@
-
 import { useState } from "react";
 import {
   Bot,
@@ -11,10 +10,13 @@ import {
 
 import "./ChatScreen.css";
 
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+
 function ChatScreen({ documents }) {
   const [selectedDocument, setSelectedDocument] = useState("");
   const [question, setQuestion] = useState("");
   const [notice, setNotice] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const [conversations, setConversations] = useState([
     {
@@ -57,8 +59,8 @@ function ChatScreen({ documents }) {
     setNotice("");
   };
 
-  const handleSend = () => {
-    if (!question.trim()) return;
+  const handleSend = async () => {
+    if (!question.trim() || loading) return;
 
     if (!selectedDocument) {
       setNotice("Please select a PDF document first.");
@@ -66,20 +68,16 @@ function ChatScreen({ documents }) {
     }
 
     const userQuestion = question.trim();
+    const conversationId = activeConversation;
 
     const userMessage = {
       role: "user",
       text: userQuestion
     };
 
-    const assistantMessage = {
-      role: "assistant",
-      text: "This is a demo response. Your question has been captured successfully. Once the FastAPI backend is connected, DocuMind will search the selected PDF, generate an answer using Gemini, and provide relevant page citations."
-    };
-
     setConversations((previous) =>
       previous.map((conversation) =>
-        conversation.id === activeConversation
+        conversation.id === conversationId
           ? {
               ...conversation,
               title:
@@ -88,8 +86,7 @@ function ChatScreen({ documents }) {
                   : conversation.title,
               messages: [
                 ...conversation.messages,
-                userMessage,
-                assistantMessage
+                userMessage
               ]
             }
           : conversation
@@ -98,6 +95,50 @@ function ChatScreen({ documents }) {
 
     setQuestion("");
     setNotice("");
+    setLoading(true);
+
+    try {
+      const response = await fetch(`${API_URL}/api/chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          document_name: selectedDocument,
+          question: userQuestion
+        })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.detail || "Failed to generate answer.");
+      }
+
+      const assistantMessage = {
+        role: "assistant",
+        text: data.answer,
+        sources: data.sources || []
+      };
+
+      setConversations((previous) =>
+        previous.map((conversation) =>
+          conversation.id === conversationId
+            ? {
+                ...conversation,
+                messages: [
+                  ...conversation.messages,
+                  assistantMessage
+                ]
+              }
+            : conversation
+        )
+      );
+    } catch (error) {
+      setNotice(error.message || "Something went wrong. Please try again.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -169,8 +210,11 @@ function ChatScreen({ documents }) {
               <option value="">Select document</option>
 
               {documents.map((document) => (
-                <option key={document.id} value={document.name}>
-                  {document.name}
+                <option
+                  key={document.id}
+                  value={document.file_name || document.name}
+                >
+                  {document.file_name || document.name}
                 </option>
               ))}
             </select>
@@ -199,16 +243,37 @@ function ChatScreen({ documents }) {
                   {message.text}
                 </div>
 
-                {message.role === "assistant" && (
+                {message.role === "assistant" && message.sources?.length > 0 && (
                   <div className="source-placeholder">
                     <FileText size={14} />
-                    Source citations will appear here
-                    after backend integration.
+                    <div>
+                      **Sources**
+                      {message.sources.map((source, sourceIndex) => (
+                        <p key={sourceIndex}>
+                          Page {source.page}
+                        </p>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
             </div>
           ))}
+
+          {loading && (
+            <div className="message-row assistant">
+              <div className="message-avatar">
+                <Bot size={18} />
+              </div>
+
+              <div className="message-content">
+                <div className="message-author">DocuMind AI</div>
+                <div className="message-bubble">
+                  Thinking... Searching your document.
+                </div>
+              </div>
+            </div>
+          )}
 
         </div>
 
@@ -241,7 +306,7 @@ function ChatScreen({ documents }) {
             <button
               className="send-button"
               onClick={handleSend}
-              disabled={!question.trim()}
+              disabled={!question.trim() || loading}
               title="Send message"
             >
               <Send size={17} />
