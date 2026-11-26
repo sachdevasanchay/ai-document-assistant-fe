@@ -1,0 +1,139 @@
+/* ---------- Auth screen ---------- */
+.auth-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f4f5fb;
+  padding: 20px;
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 400px;
+  background: #fff;
+  border-radius: 16px;
+  padding: 32px 28px;
+  box-shadow: 0 10px 40px rgba(20, 20, 60, 0.1);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  color: #1c1c2b;
+}
+
+.auth-card h1 { margin: 6px 0 0; font-size: 24px; }
+.auth-subtitle { margin: 0 0 6px; color: #6b6b80; font-size: 14px; }
+
+.auth-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  font-size: 18px;
+}
+
+.auth-brand-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: #4f46e5;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.auth-card label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.auth-card input {
+  padding: 11px 12px;
+  border: 1px solid #d9d9e6;
+  border-radius: 10px;
+  font-size: 14px;
+  outline: none;
+}
+
+.auth-card input:focus {
+  border-color: #4f46e5;
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.15);
+}
+
+.auth-error {
+  background: #fdecec;
+  color: #b42318;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+.auth-submit {
+  background: #4f46e5;
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.auth-submit:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.auth-switch { text-align: center; font-size: 13px; color: #6b6b80; margin: 0; }
+
+.auth-switch button {
+  background: none;
+  border: none;
+  color: #4f46e5;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+
+.app-splash {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #6b6b80;
+  font-size: 15px;
+}
+
+/* ---------- Conversation actions ---------- */
+.conversation-row { display: flex; align-items: center; gap: 4px; }
+.conversation-row .conversation-item { flex: 1; min-width: 0; }
+
+.conversation-row .conversation-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-actions { display: flex; gap: 2px; opacity: 0.55; }
+.conversation-row:hover .conversation-actions { opacity: 1; }
+
+.icon-button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 6px;
+  color: inherit;
+  display: flex;
+}
+
+.icon-button:hover { background: rgba(0, 0, 0, 0.08); }
+
+/* ---------- Sources ---------- */
+.source-details summary { cursor: pointer; font-size: 12px; margin-top: 4px; }
+.source-snippet { margin-top: 8px; font-size: 12px; }
+.source-snippet p { margin: 2px 0 0; white-space: pre-wrap; }
+
+/* ---------- Sidebar user ---------- */
+.logout-button { cursor: pointer; background: none; border: none; color: inherit; display: flex; padding: 4px; }

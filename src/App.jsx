@@ -1,4 +1,3 @@
-
 import { useEffect, useRef, useState } from "react";
 import {
   FileText,
@@ -9,7 +8,7 @@ import {
   Search,
   Settings,
   HelpCircle,
-  MoreHorizontal,
+  LogOut,
   Sparkles,
   FilePlus2,
   X,
@@ -19,47 +18,67 @@ import {
 } from "lucide-react";
 
 import "./App.css";
+import "./Extras.css";
 import ChatScreen from "./ChatScreen";
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+import AuthScreen from "./AuthScreen";
+import { useAuth } from "./AuthContext";
+import { apiFetch } from "./api";
+
+// Shows the login screen until the user is logged in
 function App() {
-  useEffect(() => {
-    const fetchDocuments = async () => {
-        try {
-            const response = await fetch(`${API_URL}/api/documents`);
+  const { user, loading } = useAuth();
 
-            if (!response.ok) {
-                throw new Error("Failed to fetch documents");
-            }
+  if (loading) {
+    return <div className="app-splash">Loading...</div>;
+  }
 
-            const result = await response.json();
+  if (!user) {
+    return <AuthScreen />;
+  }
 
-            const savedDocuments = result.map((document) => ({
-                id: document.id,
-                name: document.file_name,
-                size: null,
-                uploadedAt: document.created_at
-                    ? new Date(document.created_at).toLocaleDateString()
-                    : ""
-            }));
+  return <Workspace />;
+}
 
-            setDocuments(savedDocuments);
+function Workspace() {
+  const { user, logout } = useAuth();
 
-        } catch (error) {
-            console.error("Error fetching documents:", error);
-        }
-    };
-
-    fetchDocuments();
-}, []);
   const [documents, setDocuments] = useState([]);
   const [search, setSearch] = useState("");
   const [activePage, setActivePage] = useState("Dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef(null);
 
-  
+  // Load this user's documents
+  useEffect(() => {
+    const fetchDocuments = async () => {
+      try {
+        const result = await apiFetch("/api/documents");
+
+        setDocuments(
+          result.map((document) => ({
+            id: document.id,
+            name: document.file_name,
+            size: null,
+            pages: document.total_pages,
+            chunks: document.total_chunks,
+            uploadedAt: document.created_at
+              ? new Date(document.created_at).toLocaleDateString()
+              : ""
+          }))
+        );
+      } catch (error) {
+        console.error("Error fetching documents:", error);
+      }
+    };
+
+    fetchDocuments();
+  }, []);
+
   const handleUpload = async (event) => {
     const files = Array.from(event.target.files || []);
+
+    setUploading(true);
 
     for (const file of files) {
       if (file.type !== "application/pdf") {
@@ -71,23 +90,14 @@ function App() {
       formData.append("file", file);
 
       try {
-        const response = await fetch(
-          `${API_URL}/api/documents/upload`,
-          {
-            method: "POST",
-            body: formData
-          }
-        );
-
-        const result = await response.json();
-
-        if (!response.ok) {
-          throw new Error(result.detail || "Upload failed");
-        }
+        const result = await apiFetch("/api/documents/upload", {
+          method: "POST",
+          body: formData
+        });
 
         setDocuments((previous) => [
           {
-            id: `${file.name}-${file.lastModified}`,
+            id: result.document.id,
             name: result.document.file_name,
             size: (file.size / (1024 * 1024)).toFixed(2),
             uploadedAt: new Date().toLocaleDateString(),
@@ -100,29 +110,40 @@ function App() {
         ]);
 
         alert(`${file.name} uploaded and processed successfully!`);
-
       } catch (error) {
         alert(`Upload failed: ${error.message}`);
       }
     }
 
+    setUploading(false);
     event.target.value = "";
   };
-
 
   const filteredDocuments = documents.filter((document) =>
     document.name.toLowerCase().includes(search.toLowerCase())
   );
 
-  const removeDocument = (id) => {
-    setDocuments((previous) =>
-      previous.filter((document) => document.id !== id)
-    );
+  const removeDocument = async (document) => {
+    if (!window.confirm(`Delete "${document.name}" and its conversations?`)) {
+      return;
+    }
+
+    try {
+      await apiFetch(`/api/documents/${document.id}`, { method: "DELETE" });
+
+      setDocuments((previous) =>
+        previous.filter((item) => item.id !== document.id)
+      );
+    } catch (error) {
+      alert(`Could not delete document: ${error.message}`);
+    }
   };
 
   const openUpload = () => {
     fileInputRef.current?.click();
   };
+
+  const uploadLabel = uploading ? "Processing..." : "Upload PDF";
 
   return (
     <div className="app-layout">
@@ -190,12 +211,20 @@ function App() {
           </button>
 
           <div className="profile">
-            <div className="avatar">S</div>
-            <div className="profile-info">
-              <strong>My Workspace</strong>
-              <span>Personal account</span>
+            <div className="avatar">
+              {(user.name || "U").charAt(0).toUpperCase()}
             </div>
-            <MoreHorizontal size={19} />
+            <div className="profile-info">
+              <strong>{user.name}</strong>
+              <span>{user.email}</span>
+            </div>
+            <button
+              className="logout-button"
+              onClick={logout}
+              title="Log out"
+            >
+              <LogOut size={19} />
+            </button>
           </div>
         </div>
       </aside>
@@ -231,9 +260,13 @@ function App() {
               )}
             </div>
 
-            <button className="primary-button" onClick={openUpload}>
+            <button
+              className="primary-button"
+              onClick={openUpload}
+              disabled={uploading}
+            >
               <Plus size={17} />
-              Upload PDF
+              {uploadLabel}
             </button>
           </div>
         </header>
@@ -247,157 +280,152 @@ function App() {
           onChange={handleUpload}
         />
 
-
         {activePage === "Conversations" ? (
           <ChatScreen documents={documents} />
         ) : (
-  <section className="page-container">
+          <section className="page-container">
 
-          <div className="welcome-section">
-            <div>
-              <div className="eyebrow">
-                <Sparkles size={15} />
-                AI DOCUMENT ASSISTANT
-              </div>
-
-              <h1>
-                {activePage === "Dashboard"
-                  ? "Your documents, understood."
-                  : activePage}
-              </h1>
-
-              <p>
-                Upload your PDFs and get answers from your documents
-                using AI.
-              </p>
-            </div>
-
-            <button className="primary-button welcome-button" onClick={openUpload}>
-              <Upload size={17} />
-              Upload a document
-            </button>
-          </div>
-
-          <div className="stats-grid">
-            <div className="stat-card">
-              <div className="stat-icon blue">
-                <FileText size={19} />
-              </div>
+            <div className="welcome-section">
               <div>
-                <span>Total documents</span>
-                <strong>{documents.length}</strong>
-              </div>
-            </div>
-
-            <div className="stat-card">
-              <div className="stat-icon purple">
-                <MessageSquare size={19} />
-              </div>
-              <div>
-                <span>Conversations</span>
-                <strong>0</strong>
-              </div>
-            </div>
-
-            <div className="stat-card">
-              <div className="stat-icon green">
-                <Sparkles size={19} />
-              </div>
-              <div>
-                <span>AI assistant</span>
-                <strong className="available-status">Ready to use</strong>
-              </div>
-            </div>
-          </div>
-
-          <div className="section-header">
-            <div>
-              <h2>
-                {activePage === "Documents"
-                  ? "All documents"
-                  : "Your documents"}
-              </h2>
-              <p>
-                {documents.length} PDF
-                {documents.length !== 1 ? "s" : ""} uploaded
-              </p>
-            </div>
-
-            <button className="text-button" onClick={() => setActivePage("Documents")}>
-              View all
-              <ChevronRight size={16} />
-            </button>
-          </div>
-
-          {filteredDocuments.length > 0 ? (
-            <div className="document-list">
-              {filteredDocuments.map((document) => (
-                <div className="document-row" key={document.id}>
-                  <div className="pdf-icon">
-                    <File size={21} />
-                  </div>
-
-                  <div className="document-info">
-                    <strong>{document.name}</strong>
-                    <span>
-                      PDF
-                      {document.size && ` · ${document.size} MB`}
-                      {document.uploadedAt && ` · Uploaded ${document.uploadedAt}`}
-                    </span>
-                  </div>
-
-                  <button
-                    className="remove-button"
-                    title="Remove document from this demo"
-                    onClick={() => removeDocument(document.id)}
-                  >
-                    <X size={17} />
-                  </button>
+                <div className="eyebrow">
+                  <Sparkles size={15} />
+                  AI DOCUMENT ASSISTANT
                 </div>
-              ))}
-            </div>
-          ) : (
-            <div className="empty-state">
-              <div className="empty-icon">
-                <FilePlus2 size={27} />
+
+                <h1>
+                  {activePage === "Dashboard"
+                    ? `Hi ${user.name.split(" ")[0]}, your documents, understood.`
+                    : activePage}
+                </h1>
+
+                <p>
+                  Upload your PDFs and get answers from your documents
+                  using AI.
+                </p>
               </div>
 
-              <h3>
-                {search
-                  ? "No matching documents"
-                  : "No documents yet"}
-              </h3>
-
-              <p>
-                {search
-                  ? "Try searching with a different document name."
-                  : "Upload your first PDF to start exploring your documents with AI."}
-              </p>
-
-              {!search && (
-                <button className="primary-button" onClick={openUpload}>
-                  <Upload size={17} />
-                  Upload your first PDF
-                </button>
-              )}
-            </div>
-          )}
-
-          <div className="info-section">
-            <div className="info-icon">
-              <Sparkles size={20} />
+              <button
+                className="primary-button welcome-button"
+                onClick={openUpload}
+                disabled={uploading}
+              >
+                <Upload size={17} />
+                {uploading ? "Processing..." : "Upload a document"}
+              </button>
             </div>
 
-            <div>
-              <strong>Ask your documents anything</strong>
-              <p>
-                DocuMind will help you find information, understand
-                content and get answers with page references.
-              </p>
-            </div>
-          </div>
+            <div className="stats-grid">
+              <div className="stat-card">
+                <div className="stat-icon blue">
+                  <FileText size={19} />
+                </div>
+                <div>
+                  <span>Total documents</span>
+                  <strong>{documents.length}</strong>
+                </div>
+              </div>
 
-        </section>
+              <div className="stat-card">
+                <div className="stat-icon green">
+                  <Sparkles size={19} />
+                </div>
+                <div>
+                  <span>AI assistant</span>
+                  <strong className="available-status">Ready to use</strong>
+                </div>
+              </div>
+            </div>
+
+            <div className="section-header">
+              <div>
+                <h2>
+                  {activePage === "Documents"
+                    ? "All documents"
+                    : "Your documents"}
+                </h2>
+                <p>
+                  {documents.length} PDF
+                  {documents.length !== 1 ? "s" : ""} uploaded
+                </p>
+              </div>
+
+              <button
+                className="text-button"
+                onClick={() => setActivePage("Documents")}
+              >
+                View all
+                <ChevronRight size={16} />
+              </button>
+            </div>
+
+            {filteredDocuments.length > 0 ? (
+              <div className="document-list">
+                {filteredDocuments.map((document) => (
+                  <div className="document-row" key={document.id}>
+                    <div className="pdf-icon">
+                      <File size={21} />
+                    </div>
+
+                    <div className="document-info">
+                      <strong>{document.name}</strong>
+                      <span>
+                        PDF
+                        {document.size && ` · ${document.size} MB`}
+                        {document.pages && ` · ${document.pages} pages`}
+                        {document.uploadedAt && ` · Uploaded ${document.uploadedAt}`}
+                      </span>
+                    </div>
+
+                    <button
+                      className="remove-button"
+                      title="Delete document"
+                      onClick={() => removeDocument(document)}
+                    >
+                      <X size={17} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="empty-state">
+                <div className="empty-icon">
+                  <FilePlus2 size={27} />
+                </div>
+
+                <h3>
+                  {search ? "No matching documents" : "No documents yet"}
+                </h3>
+
+                <p>
+                  {search
+                    ? "Try searching with a different document name."
+                    : "Upload your first PDF to start exploring your documents with AI."}
+                </p>
+
+                {!search && (
+                  <button className="primary-button" onClick={openUpload}>
+                    <Upload size={17} />
+                    Upload your first PDF
+                  </button>
+                )}
+              </div>
+            )}
+
+            <div className="info-section">
+              <div className="info-icon">
+                <Sparkles size={20} />
+              </div>
+
+              <div>
+                <strong>Ask your documents anything</strong>
+                <p>
+                  DocuMind will help you find information, understand
+                  content and get answers with page references.
+                </p>
+              </div>
+            </div>
+
+          </section>
         )}
 
         <footer>

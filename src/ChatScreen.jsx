@@ -1,122 +1,195 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Bot,
   Send,
   Plus,
   FileText,
   MessageSquare,
-  Sparkles
+  Sparkles,
+  Pencil,
+  Trash2
 } from "lucide-react";
 
 import "./ChatScreen.css";
-
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+import "./Extras.css";
+import { apiFetch } from "./api";
 
 const WELCOME_MESSAGE = {
   role: "assistant",
   text: "Hello! I'm DocuMind. Select a PDF document and ask me anything about its content."
 };
 
-const createEmptyConversation = () => ({
-  id: Date.now(),
+// A draft is only in the browser until the first message is sent
+const createDraftConversation = () => ({
+  id: `draft-${Date.now()}`,
   title: "New conversation",
+  isDraft: true,
   messages: [WELCOME_MESSAGE]
 });
 
-// Converts a chat object from the backend into the shape used by this component
+// Converts a conversation from the backend into the shape used here
 const normalizeConversation = (chat) => ({
   id: chat.id,
-  title: chat.conversation_name || "New conversation",
-  document_name: chat.document_name,
-  messages: [
-    {
-      role: "user",
-      text: chat.conversation_name || ""
-    },
-    {
-      role: "assistant",
-      text: chat.messages || "",
-      sources: []
-    }
-  ]
+  title: chat.title || "New conversation",
+  isDraft: false,
+  messages: chat.messages || []
 });
 
 function ChatScreen({ documents }) {
-  const [selectedDocument, setSelectedDocument] = useState("");
+  const [selectedDocumentId, setSelectedDocumentId] = useState("");
   const [question, setQuestion] = useState("");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
-  const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   const [conversations, setConversations] = useState([]);
   const [activeConversation, setActiveConversation] = useState(null);
 
+  const bottomRef = useRef(null);
+
   const currentConversation = conversations.find(
     (item) => item.id === activeConversation
   );
-  // Fetch all saved chats when the screen loads
+
+  // Load saved conversations whenever the selected document changes
   useEffect(() => {
-  if (!selectedDocument) {
-    setHistoryLoading(false);
-    return;
-  }
+    if (!selectedDocumentId) {
+      setConversations([]);
+      setActiveConversation(null);
+      setHistoryLoading(false);
+      return;
+    }
 
-  const fetchConversations = async () => {
-    try {
-      const response = await fetch(
-        `${API_URL}/api/conversations?document_name=${encodeURIComponent(selectedDocument)}`
-      );
+    let cancelled = false;
 
-      const data = await response.json();
+    const loadConversations = async () => {
+      setHistoryLoading(true);
+      setNotice("");
 
-      if (!response.ok) {
-        throw new Error(data.detail || "Failed to load conversations.");
-      }
+      try {
+        const list = await apiFetch(
+          `/api/conversations?document_id=${encodeURIComponent(selectedDocumentId)}`
+        );
 
-      const list = Array.isArray(data) ? data : data.conversations || [];
-      const loaded = list.map(normalizeConversation);
+        if (cancelled) return;
 
-      if (loaded.length > 0) {
-        setConversations(loaded);
-        setActiveConversation(loaded[0].id);
-      } else {
-        const fresh = createEmptyConversation();
+        const loaded = list.map(normalizeConversation);
+
+        if (loaded.length > 0) {
+          setConversations(loaded);
+          setActiveConversation(loaded[0].id);
+        } else {
+          const fresh = createDraftConversation();
+          setConversations([fresh]);
+          setActiveConversation(fresh.id);
+        }
+      } catch (error) {
+        if (cancelled) return;
+
+        setNotice(error.message || "Could not load your conversations.");
+
+        const fresh = createDraftConversation();
         setConversations([fresh]);
         setActiveConversation(fresh.id);
+      } finally {
+        if (!cancelled) setHistoryLoading(false);
       }
-    } catch (error) {
-      setNotice(error.message || "Could not load your conversations.");
+    };
 
-      const fresh = createEmptyConversation();
-      setConversations([fresh]);
-      setActiveConversation(fresh.id);
-    } finally {
-      setHistoryLoading(false);
+    loadConversations();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedDocumentId]);
+
+  // Scroll to the newest message
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [currentConversation?.messages.length, loading]);
+
+  const handleNewConversation = () => {
+    if (!selectedDocumentId) {
+      setNotice("Please select a PDF document first.");
+      return;
+    }
+
+    // Reuse an existing empty draft instead of stacking many drafts
+    const existingDraft = conversations.find((item) => item.isDraft);
+
+    if (existingDraft) {
+      setActiveConversation(existingDraft.id);
+    } else {
+      const draft = createDraftConversation();
+      setConversations((previous) => [draft, ...previous]);
+      setActiveConversation(draft.id);
+    }
+
+    setQuestion("");
+    setNotice("");
+  };
+
+  const handleRename = async (conversation) => {
+    if (conversation.isDraft) return;
+
+    const newTitle = window.prompt("Rename conversation", conversation.title);
+
+    if (!newTitle || !newTitle.trim()) return;
+
+    try {
+      const result = await apiFetch(`/api/conversations/${conversation.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ title: newTitle.trim() })
+      });
+
+      setConversations((previous) =>
+        previous.map((item) =>
+          item.id === conversation.id ? { ...item, title: result.title } : item
+        )
+      );
+    } catch (error) {
+      setNotice(error.message || "Could not rename the conversation.");
     }
   };
 
-  fetchConversations();
-}, [selectedDocument]);
+  const handleDelete = async (conversation) => {
+    if (!conversation.isDraft) {
+      if (!window.confirm(`Delete "${conversation.title}"?`)) return;
 
-  const handleNewConversation = () => {
-    const newConversation = createEmptyConversation();
+      try {
+        await apiFetch(`/api/conversations/${conversation.id}`, {
+          method: "DELETE"
+        });
+      } catch (error) {
+        setNotice(error.message || "Could not delete the conversation.");
+        return;
+      }
+    }
 
-    setConversations((previous) => [newConversation, ...previous]);
-    setActiveConversation(newConversation.id);
-    setQuestion("");
-    setNotice("");
+    let remaining = conversations.filter((item) => item.id !== conversation.id);
+
+    if (remaining.length === 0) {
+      remaining = [createDraftConversation()];
+    }
+
+    setConversations(remaining);
+
+    if (activeConversation === conversation.id) {
+      setActiveConversation(remaining[0].id);
+    }
   };
 
   const handleSend = async () => {
     if (!question.trim() || loading || !currentConversation) return;
 
-    if (!selectedDocument) {
+    if (!selectedDocumentId) {
       setNotice("Please select a PDF document first.");
       return;
     }
 
     const userQuestion = question.trim();
     const conversationId = activeConversation;
+    const isDraft = currentConversation.isDraft;
 
     const userMessage = {
       role: "user",
@@ -128,10 +201,7 @@ function ChatScreen({ documents }) {
         conversation.id === conversationId
           ? {
               ...conversation,
-              title:
-                conversation.title === "New conversation"
-                  ? userQuestion.slice(0, 35)
-                  : conversation.title,
+              title: isDraft ? userQuestion.slice(0, 40) : conversation.title,
               messages: [...conversation.messages, userMessage]
             }
           : conversation
@@ -143,23 +213,14 @@ function ChatScreen({ documents }) {
     setLoading(true);
 
     try {
-      const response = await fetch(`${API_URL}/api/chat`, {
+      const data = await apiFetch("/api/chat", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
         body: JSON.stringify({
-          document_name: selectedDocument,
+          document_id: selectedDocumentId,
           question: userQuestion,
-          conversation_id: conversationId
+          conversation_id: isDraft ? null : conversationId
         })
       });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.detail || "Failed to generate answer.");
-      }
 
       const assistantMessage = {
         role: "assistant",
@@ -167,7 +228,6 @@ function ChatScreen({ documents }) {
         sources: data.sources || []
       };
 
-      // If the backend created a new conversation, use its id instead of the local one
       const savedId = data.conversation_id || conversationId;
 
       setConversations((previous) =>
@@ -176,6 +236,8 @@ function ChatScreen({ documents }) {
             ? {
                 ...conversation,
                 id: savedId,
+                isDraft: false,
+                title: data.title || conversation.title,
                 messages: [...conversation.messages, assistantMessage]
               }
             : conversation
@@ -191,6 +253,10 @@ function ChatScreen({ documents }) {
       setLoading(false);
     }
   };
+
+  const messagesToShow = currentConversation
+    ? currentConversation.messages
+    : [WELCOME_MESSAGE];
 
   return (
     <div className="chat-workspace">
@@ -223,16 +289,36 @@ function ChatScreen({ documents }) {
             <p className="conversation-loading">Loading conversations...</p>
           ) : (
             conversations.map((conversation) => (
-              <button
-                key={conversation.id}
-                className={`conversation-item ${
-                  activeConversation === conversation.id ? "selected" : ""
-                }`}
-                onClick={() => setActiveConversation(conversation.id)}
-              >
-                <MessageSquare size={16} />
-                <span>{conversation.title}</span>
-              </button>
+              <div className="conversation-row" key={conversation.id}>
+                <button
+                  className={`conversation-item ${
+                    activeConversation === conversation.id ? "selected" : ""
+                  }`}
+                  onClick={() => setActiveConversation(conversation.id)}
+                >
+                  <MessageSquare size={16} />
+                  <span>{conversation.title}</span>
+                </button>
+
+                <div className="conversation-actions">
+                  {!conversation.isDraft && (
+                    <button
+                      className="icon-button"
+                      title="Rename"
+                      onClick={() => handleRename(conversation)}
+                    >
+                      <Pencil size={14} />
+                    </button>
+                  )}
+                  <button
+                    className="icon-button"
+                    title="Delete"
+                    onClick={() => handleDelete(conversation)}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              </div>
             ))
           )}
         </div>
@@ -255,18 +341,14 @@ function ChatScreen({ documents }) {
             <FileText size={16} />
 
             <select
-              value={selectedDocument}
-              onChange={(event) => setSelectedDocument(event.target.value)}
-              
+              value={selectedDocumentId}
+              onChange={(event) => setSelectedDocumentId(event.target.value)}
             >
               <option value="">Select document</option>
 
               {documents.map((document) => (
-                <option
-                  key={document.id}
-                  value={document.file_name || document.name}
-                >
-                  {document.file_name || document.name}
+                <option key={document.id} value={document.id}>
+                  {document.name}
                 </option>
               ))}
             </select>
@@ -274,7 +356,7 @@ function ChatScreen({ documents }) {
         </div>
 
         <div className="chat-messages">
-          {currentConversation?.messages.map((message, index) => (
+          {messagesToShow.map((message, index) => (
             <div key={index} className={`message-row ${message.role}`}>
               {message.role === "assistant" && (
                 <div className="message-avatar">
@@ -287,20 +369,35 @@ function ChatScreen({ documents }) {
                   {message.role === "assistant" ? "DocuMind AI" : "You"}
                 </div>
 
-                <div className="message-bubble">{message.text}</div>
+                <div
+                  className="message-bubble"
+                  style={{ whiteSpace: "pre-wrap" }}
+                >
+                  {message.text}
+                </div>
 
-                {message.role === "assistant" &&
-                  message.sources?.length > 0 && (
-                    <div className="source-placeholder">
-                      <FileText size={14} />
-                      <div>
-                        <strong>Sources</strong>
+                {message.role === "assistant" && message.sources?.length > 0 && (
+                  <div className="source-placeholder">
+                    <FileText size={14} />
+                    <div>
+                      <strong>Sources</strong>
+                      <p>
+                        Pages:{" "}
+                        {[...new Set(message.sources.map((s) => s.page))].join(", ")}
+                      </p>
+
+                      <details className="source-details">
+                        <summary>View source text</summary>
                         {message.sources.map((source, sourceIndex) => (
-                          <p key={sourceIndex}>Page {source.page}</p>
+                          <div className="source-snippet" key={sourceIndex}>
+                            <strong>Page {source.page}</strong>
+                            <p>{source.text}</p>
+                          </div>
                         ))}
-                      </div>
+                      </details>
                     </div>
-                  )}
+                  </div>
+                )}
               </div>
             </div>
           ))}
@@ -319,6 +416,8 @@ function ChatScreen({ documents }) {
               </div>
             </div>
           )}
+
+          <div ref={bottomRef} />
         </div>
 
         <div className="chat-bottom">
@@ -341,7 +440,7 @@ function ChatScreen({ documents }) {
             <button
               className="send-button"
               onClick={handleSend}
-              disabled={!question.trim() || loading}
+              disabled={!question.trim() || loading || !selectedDocumentId}
               title="Send message"
             >
               <Send size={17} />
